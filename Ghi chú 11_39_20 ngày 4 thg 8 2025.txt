@@ -1,0 +1,499 @@
+/**
+ * ========================================================================================================
+ * File: sicbo_prediction_api_ultimate_ai_god_tier_v8.js
+ * Author: [kiên] (Refactored & Enhanced by AI)
+ * Description: The definitive and most advanced Sic Bo prediction system. This version incorporates a
+ * self-learning reinforcement model, a sophisticated consensus engine, cyclical pattern detection,
+ * and dynamic risk assessment for a comprehensive and highly optimized analysis.
+ *
+ * ========================================================================================================
+ */
+
+const express = require('express');
+const axios = require('axios');
+const NodeCache = require('node-cache');
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// ========================================================================================================
+// === 1. CONFIGURATION & CORE UTILITIES ===
+// ========================================================================================================
+const predictionCache = new NodeCache({ stdTTL: 15, checkperiod: 5 });
+const axiosInstance = axios.create({ timeout: 45000 });
+
+// State for Reinforcement Learning (RL) - The AI's brain
+let dynamicWeights = {
+    taixiu: { markov: 1.0, pattern: 1.0, balance: 1.0, volatility: 1.0, cyclical: 1.0 },
+    chanle: { markov: 1.0, pattern: 1.0, balance: 1.0, volatility: 1.0, cyclical: 1.0 }
+};
+const learningRate = 0.05;
+
+// === Axios Interceptor for Robust Retries ===
+axiosInstance.interceptors.response.use(
+  response => response,
+  async error => {
+    const { config, response } = error;
+    if (!response || response.status >= 500 || ['ECONNABORTED', 'ENOTFOUND', 'EAI_AGAIN'].includes(error.code)) {
+      const MAX_RETRIES = 7;
+      config.__retryCount = config.__retryCount || 0;
+      if (config.__retryCount < MAX_RETRIES) {
+        config.__retryCount += 1;
+        const delay = Math.pow(2, config.__retryCount) * 1000;
+        console.warn(`[Axios] Connection/Server Error (${error.message}). Retrying attempt ${config.__retryCount} in ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        return axiosInstance(config);
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
+// === Basic Data Transformation Functions ===
+const getTrueSumProbabilities = () => {
+    const sumCounts = {};
+    for (let d1 = 1; d1 <= 6; d1++) {
+        for (let d2 = 1; d2 <= 6; d2++) {
+            for (let d3 = 1; d3 <= 6; d3++) {
+                const sum = d1 + d2 + d3;
+                sumCounts[sum] = (sumCounts[sum] || 0) + 1;
+            }
+        }
+    }
+    const totalOutcomes = 216;
+    const probabilities = {};
+    for (const sum in sumCounts) {
+        probabilities[sum] = (sumCounts[sum] / totalOutcomes);
+    }
+    return probabilities;
+};
+
+const getHistoryStatus = (history) => history.map(h => ({
+    phien: h.phien,
+    tong: h.tong,
+    taixiu: h.tong >= 11 ? 'Tài' : 'Xỉu',
+    chanle: h.tong % 2 === 0 ? 'Chẵn' : 'Lẻ',
+}));
+
+// ========================================================================================================
+// === 2. AI ANALYSIS MODULES (The Engine) ===
+// ========================================================================================================
+
+// Module 1: Phân tích Chuỗi Markov Bậc 2
+const analyzeMarkovChain2 = (statusHistory, type = 'taixiu') => {
+  if (statusHistory.length < 3) return { prediction: null, certainty: 0, description: "Markov: Không đủ dữ liệu (>= 3 phiên)." };
+  const lastTwoStates = statusHistory.slice(0, 2).map(s => s[type]).reverse().join('');
+  const transitions = {};
+  for (let i = 2; i < statusHistory.length; i++) {
+    const key = statusHistory[i - 2][type] + statusHistory[i - 1][type];
+    const nextState = statusHistory[i][type];
+    transitions[key] = transitions[key] || { 'Tài': 0, 'Xỉu': 0, 'Chẵn': 0, 'Lẻ': 0 };
+    transitions[key][nextState]++;
+  }
+
+  const currentTransition = transitions[lastTwoStates];
+  if (!currentTransition) return { prediction: null, certainty: 0, description: "Markov: Không tìm thấy chuỗi chuyển đổi tương ứng." };
+
+  const total = currentTransition['Tài'] + currentTransition['Xỉu'] + currentTransition['Chẵn'] + currentTransition['Lẻ'];
+  if (total === 0) return { prediction: null, certainty: 0, description: "Markov: Chưa có chuyển đổi nào từ trạng thái hiện tại." };
+
+  let predicted = null;
+  let maxCount = 0;
+  for (const state in currentTransition) {
+    if (currentTransition[state] > maxCount) {
+      maxCount = currentTransition[state];
+      predicted = state;
+    }
+  }
+  const certainty = Math.round((maxCount / total) * 100);
+  return { prediction: predicted, certainty: certainty, description: `[Markov] Dự đoán "${predicted}" (${certainty}%) dựa trên chuỗi "${lastTwoStates}".` };
+};
+
+// Module 2: Phân tích Mẫu hình và Lực cầu (Multi-timeframe)
+const analyzeMultiTimeframePatterns = (history, type = 'taixiu') => {
+    const n = history.length;
+    if (n < 4) return { prediction: null, certainty: 0, description: "Pattern: Không đủ dữ liệu (>= 4 phiên)." };
+
+    const sequence = history.slice(0, 20).map(h => h[type]);
+
+    // Phân tích bệt (streak)
+    let streakCount = 1;
+    for (let i = 1; i < sequence.length; i++) {
+        if (sequence[i] === sequence[i - 1]) streakCount++;
+        else break;
+    }
+    if (streakCount >= 4) {
+        return {
+            prediction: sequence[0],
+            certainty: Math.min(streakCount * 12, 85),
+            description: `[Pattern] Cầu bệt ${streakCount} phiên. Dự đoán sẽ tiếp tục theo bệt.`
+        };
+    }
+
+    // Phân tích đảo 1-1
+    let alternatingCount = 0;
+    for (let i = 0; i < sequence.length && i < 10; i++) {
+        if (i > 0 && sequence[i] !== sequence[i - 1]) alternatingCount++;
+        else if (i > 0) break;
+    }
+    if (alternatingCount >= 4) {
+        const nextPrediction = sequence[0] === 'Tài' || sequence[0] === 'Chẵn' ? (type === 'taixiu' ? 'Xỉu' : 'Lẻ') : (type === 'taixiu' ? 'Tài' : 'Chẵn');
+        return {
+            prediction: nextPrediction,
+            certainty: Math.min(alternatingCount * 15, 90),
+            description: `[Pattern] Cầu đảo 1-1 kéo dài ${alternatingCount + 1} phiên. Dự đoán sẽ tiếp tục đảo.`
+        };
+    }
+
+    return { prediction: null, certainty: 0, description: "Pattern: Không có mẫu hình rõ ràng." };
+};
+
+// Module 3: Phân tích Cân bằng cầu
+const analyzeBalance = (history, type = 'taixiu') => {
+    const n = history.length;
+    if (n < 20) return { prediction: null, certainty: 0, description: "Balance: Cần nhiều dữ liệu (>= 20 phiên)." };
+    
+    const recentHistory = history.slice(0, 20);
+    const counts = { 'Tài': 0, 'Xỉu': 0, 'Chẵn': 0, 'Lẻ': 0 };
+    recentHistory.forEach(h => counts[h[type]]++);
+
+    const total = counts['Tài'] + counts['Xỉu'] || counts['Chẵn'] + counts['Lẻ'];
+    if (total === 0) return { prediction: null, certainty: 0, description: "Balance: Lịch sử rỗng." };
+    
+    const diff = Math.abs(counts['Tài'] - counts['Xỉu'] || counts['Chẵn'] - counts['Lẻ']);
+    if (diff > 5) {
+        const prediction = (type === 'taixiu') ? (counts['Tài'] > counts['Xỉu'] ? 'Xỉu' : 'Tài') : (counts['Chẵn'] > counts['Lẻ'] ? 'Lẻ' : 'Chẵn');
+        const certainty = Math.min((diff / total) * 100 * 1.5, 90);
+        return { prediction, certainty, description: `[Balance] Cầu ngắn hạn đang lệch. Dự đoán phiên tiếp theo sẽ cân bằng lại.` };
+    }
+    return { prediction: null, certainty: 0, description: "Balance: Cầu đang cân bằng, không có dấu hiệu đảo chiều mạnh." };
+};
+
+// Module 4: Phân tích Biến động và Rủi ro Thị trường
+const analyzeVolatilityAndRisk = (history) => {
+    const n = history.length;
+    if (n < 20) return { riskLevel: 1, description: "Volatility: Không đủ dữ liệu để đánh giá rủi ro." };
+
+    const recentTaiXiu = history.slice(0, 20).map(h => h.taixiu);
+    let switchCount = 0;
+    for (let i = 1; i < recentTaiXiu.length; i++) {
+        if (recentTaiXiu[i] !== recentTaiXiu[i - 1]) switchCount++;
+    }
+    
+    const normalizedScore = (switchCount / 19) * 100;
+    let riskLevel = 1; // 1: Thấp, 2: Trung bình, 3: Cao
+    let description = '';
+
+    if (normalizedScore > 75) {
+        riskLevel = 3;
+        description = `[Risk] Biến động cực mạnh (${normalizedScore.toFixed(0)}%). Khuyến cáo hạn chế vào tiền.`;
+    } else if (normalizedScore < 25) {
+        riskLevel = 3;
+        description = `[Risk] Cầu đi cực kỳ đều (${normalizedScore.toFixed(0)}%). Khả năng cầu bị "gãy" đột ngột rất cao.`;
+    } else {
+        riskLevel = 1;
+        description = `[Risk] Thị trường ổn định. Rủi ro ở mức trung bình.`;
+    }
+    
+    return { riskLevel, description };
+};
+
+// Module 5: Phân tích Chu kỳ Lặp lại
+const analyzeCyclicalPatterns = (history, type = 'taixiu') => {
+    const n = history.length;
+    if (n < 50) return { prediction: null, certainty: 0, description: "Cyclical: Không đủ dữ liệu để tìm chu kỳ." };
+
+    const recent = history.slice(0, 20).map(h => h[type]).join('');
+    const longTermHistory = history.slice(20, 100).map(h => h[type]).join('');
+
+    const matchIndex = longTermHistory.indexOf(recent);
+    if (matchIndex !== -1) {
+        const nextStateInCycle = longTermHistory[matchIndex + recent.length];
+        if (nextStateInCycle) {
+            return {
+                prediction: nextStateInCycle,
+                certainty: 75,
+                description: `[Cyclical] Phát hiện chu kỳ lặp lại trong lịch sử. Dự đoán theo chu kỳ.`
+            };
+        }
+    }
+    return { prediction: null, certainty: 0, description: "Cyclical: Không tìm thấy chu kỳ tương tự." };
+};
+
+// ========================================================================================================
+// === 3. DYNAMIC WEIGHTS & PREDICTION FUSION ENGINE ===
+// ========================================================================================================
+
+const updateDynamicWeights = (history, lastPrediction) => {
+    if (history.length < 2 || !lastPrediction) return;
+
+    const latestResult = history[0];
+    const type = 'taixiu';
+    
+    for (const model in dynamicWeights[type]) {
+        const modelInfo = lastPrediction.prediction_breakdown[model];
+        if (modelInfo) {
+            const correctPrediction = latestResult.taixiu === modelInfo.prediction;
+            const adjustment = learningRate * (modelInfo.certainty / 100) * (modelInfo.score / lastPrediction.do_tin_cay);
+            if (correctPrediction) {
+                dynamicWeights[type][model] = Math.min(dynamicWeights[type][model] + adjustment, 2.0);
+            } else {
+                dynamicWeights[type][model] = Math.max(dynamicWeights[type][model] - adjustment, 0.5);
+            }
+        }
+    }
+    const totalWeight = Object.values(dynamicWeights[type]).reduce((sum, w) => sum + w, 0);
+    for (const model in dynamicWeights[type]) {
+        dynamicWeights[type][model] /= totalWeight;
+    }
+    console.log('[RL] Trọng số mới cho Tài/Xỉu:', dynamicWeights.taixiu);
+};
+
+const predictFinalUltimate = (history, type = 'taixiu') => {
+    const analysisResults = {
+        markov: analyzeMarkovChain2(history, type),
+        pattern: analyzeMultiTimeframePatterns(history, type),
+        balance: analyzeBalance(history, type),
+        cyclical: analyzeCyclicalPatterns(history, type),
+    };
+    const riskInfo = analyzeVolatilityAndRisk(history);
+
+    let finalScore = { 'Tài': 0, 'Xỉu': 0, 'Chẵn': 0, 'Lẻ': 0 };
+    let descriptions = [];
+    let predictionBreakdown = {};
+
+    for (const model in analysisResults) {
+        const result = analysisResults[model];
+        const weight = dynamicWeights[type][model];
+        if (result.prediction && weight > 0) {
+            const score = result.certainty * weight;
+            finalScore[result.prediction] += score;
+            descriptions.push(result.description);
+            predictionBreakdown[model] = {
+                prediction: result.prediction,
+                certainty: result.certainty,
+                score: score,
+                weight: weight
+            };
+        }
+    }
+
+    let finalPrediction = null;
+    let maxScore = 0;
+    if (type === 'taixiu') {
+        if (finalScore['Tài'] > finalScore['Xỉu']) {
+            finalPrediction = 'Tài';
+            maxScore = finalScore['Tài'];
+        } else if (finalScore['Xỉu'] > finalScore['Tài']) {
+            finalPrediction = 'Xỉu';
+            maxScore = finalScore['Xỉu'];
+        }
+    } else {
+        if (finalScore['Chẵn'] > finalScore['Lẻ']) {
+            finalPrediction = 'Chẵn';
+            maxScore = finalScore['Chẵn'];
+        } else if (finalScore['Lẻ'] > finalScore['Chẵn']) {
+            finalPrediction = 'Lẻ';
+            maxScore = finalScore['Lẻ'];
+        }
+    }
+
+    const totalWeightedScore = Object.values(predictionBreakdown).reduce((sum, p) => sum + p.score, 0) || 1;
+    let finalCertainty = totalWeightedScore > 0 ? Math.round((maxScore / totalWeightedScore) * 100) : 0;
+    
+    // Kiểm tra đồng thuận - Consensus Engine
+    let agreementCount = Object.values(predictionBreakdown).filter(p => p.prediction === finalPrediction).length;
+    if (agreementCount < Object.keys(predictionBreakdown).length / 2) {
+        finalCertainty = Math.min(finalCertainty, 60);
+        descriptions.unshift("[WARNING] Các mô hình AI không đồng thuận. Rủi ro cao.");
+    }
+    
+    // Áp dụng rủi ro thị trường
+    if(riskInfo.riskLevel === 3) {
+        finalCertainty = Math.min(finalCertainty, 55);
+        descriptions.unshift("[HIGH RISK] Thị trường đang biến động bất thường. Hạn chế vào tiền.");
+    }
+
+    const giai_thich = descriptions.join('\n');
+
+    return {
+        du_doan: finalPrediction,
+        do_tin_cay: finalCertainty,
+        giai_thich_chi_tiet: giai_thich,
+        risk_level: riskInfo.riskLevel,
+        risk_description: riskInfo.description,
+        prediction_breakdown: predictionBreakdown
+    };
+};
+
+const predictSums = (history, taixiu_prediction) => {
+    const sumProbabilities = getTrueSumProbabilities();
+    const recentSums = history.slice(0, 70).map(h => h.tong);
+    const sumsToPredict = taixiu_prediction === 'Tài' ? [11, 12, 13, 14, 15, 16, 17] : [4, 5, 6, 7, 8, 9, 10];
+
+    const sumScores = {};
+    for (const sum of sumsToPredict) {
+        const recentFreq = recentSums.filter(s => s === sum).length / 70;
+        const freqScore = Math.abs(recentFreq - sumProbabilities[sum]) * 100;
+        const lastSeenIndex = recentSums.findIndex(s => s === sum);
+        const timeNotSeen = lastSeenIndex === -1 ? recentSums.length : lastSeenIndex;
+        const timeScore = Math.min(timeNotSeen / 20, 1);
+        const patternScore = (sum >= 11 && taixiu_prediction === 'Tài') || (sum < 11 && taixiu_prediction === 'Xỉu') ? 1.5 : 1;
+
+        const totalScore = (freqScore * 1.5) + (timeScore * 2.0) + (patternScore * 1.0);
+        sumScores[sum] = totalScore;
+    }
+
+    const predictedSums = Object.entries(sumScores)
+        .sort(([, scoreA], [, scoreB]) => scoreB - scoreA)
+        .slice(0, 3)
+        .map(([sum]) => parseInt(sum));
+
+    return predictedSums;
+};
+
+// ========================================================================================================
+// === 4. CORE ASYNCHRONOUS TASK RUNNER ===
+// ========================================================================================================
+const runPredictionAnalysis = async (history) => {
+  try {
+    if (!Array.isArray(history) || history.length < 50) {
+      console.warn('[Analysis] Invalid history data. Skipping analysis.');
+      return null;
+    }
+
+    const statusHistory = getHistoryStatus(history);
+    const latest = history[0];
+    const latestPhienInt = parseInt(String(latest.phien));
+    const phien_sau = !isNaN(latestPhienInt) ? String(latestPhienInt + 1) : "N/A";
+    
+    const lastPrediction = predictionCache.get('last_prediction_taixiu');
+    if (lastPrediction) {
+        updateDynamicWeights(statusHistory, lastPrediction);
+    }
+
+    const [taixiu_result, chanle_result] = await Promise.all([
+      predictFinalUltimate(statusHistory, 'taixiu'),
+      predictFinalUltimate(statusHistory, 'chanle')
+    ]);
+    
+    predictionCache.set('last_prediction_taixiu', taixiu_result, 15);
+    
+    const predictedSums = predictSums(history, taixiu_result.du_doan);
+
+    const result = {
+      phien_truoc: latest.phien,
+      tong_truoc: latest.tong,
+      ket_qua_truoc: latest.ket_qua,
+      phien_sau: phien_sau,
+      du_doan_taixiu: taixiu_result.du_doan,
+      doan_vi: predictedSums,
+      du_doan_chan_le: chanle_result.du_doan,
+      do_tin_cay_taixiu: `${taixiu_result.do_tin_cay.toFixed(2)}%`,
+      do_tin_cay_chanle: `${chanle_result.do_tin_cay.toFixed(2)}%`,
+      giai_thich_chi_tiet: `**[Báo cáo Tài/Xỉu]:**\n${taixiu_result.giai_thich_chi_tiet.trim()}\n\n**[Báo cáo Chẵn/Lẻ]:**\n${chanle_result.giai_thich_chi_tiet.trim()}`,
+      risk_report: {
+          level: taixiu_result.risk_level,
+          description: taixiu_result.risk_description
+      },
+      luu_y: "Cảnh báo: Đây là công cụ phân tích thống kê, không phải dự đoán chắc chắn. Chơi có trách nhiệm.",
+      lien_he: "@CStool001"
+    };
+    return result;
+  } catch (err) {
+    console.error('[Analysis Task] Error during prediction analysis:', err);
+    return null;
+  }
+};
+
+// ========================================================================================================
+// === 5. EXPRESS API ENDPOINTS ===
+// ========================================================================================================
+app.use(express.json());
+app.use((req, res, next) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+    next();
+});
+
+let isAnalysisRunning = false;
+const refreshPredictionCache = async () => {
+    if (isAnalysisRunning) return;
+    isAnalysisRunning = true;
+    try {
+        console.log('[Background Task] Starting cache refresh...');
+        const response = await axiosInstance.get('https://sicbosun-100.onrender.com/api');
+        const result = await runPredictionAnalysis(response.data);
+        if (result) {
+            predictionCache.set('sicbo_prediction', result);
+            console.log('[Background Task] Cache updated successfully.');
+        } else {
+            console.error('[Background Task] Failed to get valid analysis result. Cache not updated.');
+        }
+    } catch (err) {
+        console.error('[Background Task] Error during cache refresh:', err);
+    } finally {
+        isAnalysisRunning = false;
+    }
+};
+
+app.get('/api/sicbo/vannhat', async (req, res, next) => {
+  try {
+    const cachedResult = predictionCache.get('sicbo_prediction');
+    if (cachedResult) {
+      console.log('[API Request] Serving from cache.');
+      setImmediate(refreshPredictionCache);
+      return res.json(cachedResult);
+    }
+
+    console.log('[API Request] No cache found. Fetching data and running analysis...');
+    const response = await axiosInstance.get('https://sicbosun-100.onrender.com/api');
+    const history = response.data;
+
+    if (!Array.isArray(history) || history.length < 50) {
+      return res.status(200).json({
+        phien_sau: "N/A",
+        du_doan: "Không đủ dữ liệu lịch sử để dự đoán.",
+        doan_vi: [],
+        do_tin_cay: "0%",
+        giai_thich_chi_tiet: "Cần ít nhất 50 phiên để hệ thống AI phân tích siêu tối ưu.",
+        luu_y: "Cảnh báo: Đây là công cụ phân tích thống kê, không phải dự đoán chắc chắn. Chơi có trách nhiệm.",
+        lien_he: "@CStool001"
+      });
+    }
+
+    const result = await runPredictionAnalysis(history);
+    if (result) {
+      predictionCache.set('sicbo_prediction', result);
+      res.json(result);
+    } else {
+      res.status(500).json({ error: { message: 'Lỗi trong quá trình phân tích. Vui lòng thử lại.' } });
+    }
+
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.use((err, req, res, next) => {
+  console.error('[Express Error] Server error:', err.stack);
+  if (res.headersSent) return next(err);
+  const status = err.response?.status || 500;
+  const message = err.response?.statusText || err.message || 'Đã xảy ra lỗi không xác định trên máy chủ.';
+  res.status(status).json({
+    error: {
+      message: 'Lỗi khi lấy dữ liệu từ API bên thứ 3. Vui lòng thử lại sau.',
+      details: message
+    }
+  });
+});
+
+// ========================================================================================================
+// === 6. SERVER STARTUP & INITIALIZATION ===
+// ========================================================================================================
+app.listen(PORT, () => {
+  console.log(`✅ API Phân tích & Dự đoán Sicbo đang chạy tại http://localhost:${PORT}`);
+  console.log(`⚠️ Lưu ý: Đây là công cụ phân tích thống kê, không phải công cụ dự đoán chắc chắn. Tài Xỉu là trò chơi may rủi.`);
+
+  refreshPredictionCache();
+  setInterval(refreshPredictionCache, 15 * 1000);
+});
