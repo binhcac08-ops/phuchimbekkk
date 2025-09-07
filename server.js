@@ -3,14 +3,14 @@ const axios = require('axios');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// URL của API lịch sử chính bạn đã cung cấp
+// URL API lịch sử của bạn
 const HISTORY_API_URL = 'https://hitclub-n2b4.onrender.com/api/hit';
 
 // Cache để lưu trữ giá trị độ tin cậy và số phiên
 let cachedConfidence = null;
 let cachedSession = null;
 
-// --- THUẬT TOÁN DỰ ĐOÁN CỦA BẠN ĐÃ ĐƯỢC TÍCH HỢP ---
+// --- THUẬT TOÁN DỰ ĐOÁN ---
 
 // Hàm dự đoán theo xí ngầu
 function duDoanTheoXiNgau(diceList) {
@@ -67,12 +67,12 @@ function predictTaiXiu(historicalData) {
     };
 }
 
-// Endpoint chính của API để lấy dự đoán
+// Endpoint chính để lấy dự đoán
 app.get('/api/taixiu/du_doan_hit', async (req, res) => {
     try {
         const response = await axios.get(HISTORY_API_URL);
-        
-        // Kiểm tra nếu dữ liệu không phải mảng, bọc nó lại
+
+        // Bọc dữ liệu nếu chỉ trả về 1 object
         const historicalDataNewFormat = Array.isArray(response.data) ? response.data : [response.data];
 
         if (!historicalDataNewFormat || historicalDataNewFormat.length === 0) {
@@ -83,13 +83,13 @@ app.get('/api/taixiu/du_doan_hit', async (req, res) => {
                 giai_thich: "Lỗi hệ thống hoặc không đủ dữ liệu."
             });
         }
-        
-        // Chuyển đổi dữ liệu sang định dạng cũ để chạy thuật toán dự đoán
+
+        // Mapping dữ liệu theo API mới
         const historicalData = historicalDataNewFormat.map(item => ({
-            session: item.Phien,
-            dice: [item.xuc_xac_1, item.xuc_xac_2, item.xuc_xac_3],
-            total: item.tong,
-            result: item.ket_qua,
+            session: item.sid,
+            dice: [item.Xuc_xac_1, item.Xuc_xac_2, item.Xuc_xac_3],
+            total: item.Tong,
+            result: item.Ket_qua,
         }));
 
         const currentData = historicalData[0];
@@ -97,12 +97,12 @@ app.get('/api/taixiu/du_doan_hit', async (req, res) => {
         const nextSession = currentData.session + 1;
         const { du_doan } = predictTaiXiu(historicalData);
 
-        // Kiểm tra nếu phiên trước khác với phiên đã cache, thì tạo độ tin cậy mới
+        // Cache độ tin cậy theo phiên trước
         if (cachedSession !== previousSession) {
             cachedSession = previousSession;
             cachedConfidence = getRandomConfidence() + "%";
         }
-        
+
         const result = {
             id: "@cskhtoollxk",
             sid: previousSession,  // phiên trước
@@ -111,7 +111,7 @@ app.get('/api/taixiu/du_doan_hit', async (req, res) => {
             ket_qua: currentData.result,
             phien_sau: nextSession,
             du_doan: du_doan,
-            do_tin_cay: cachedConfidence, // dùng giá trị đã cache
+            do_tin_cay: cachedConfidence,
             giai_thich: "yêu anh đi chim a to lắm óoo.",
         };
         res.json(result);
