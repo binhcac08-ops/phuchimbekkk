@@ -68,11 +68,11 @@ function predictTaiXiu(historicalData) {
 }
 
 // Endpoint chính của API để lấy dự đoán
-app.get('/api/taixiu/du_doan_68gb', async (req, res) => {
+app.get('/api/taixiu/du_doan_hit', async (req, res) => {
     try {
         const response = await axios.get(HISTORY_API_URL);
         
-        // Sửa lỗi ở đây: kiểm tra nếu dữ liệu không phải mảng, bọc nó lại
+        // Kiểm tra nếu dữ liệu không phải mảng, bọc nó lại
         const historicalDataNewFormat = Array.isArray(response.data) ? response.data : [response.data];
 
         if (!historicalDataNewFormat || historicalDataNewFormat.length === 0) {
@@ -93,24 +93,25 @@ app.get('/api/taixiu/du_doan_68gb', async (req, res) => {
         }));
 
         const currentData = historicalData[0];
+        const previousSession = currentData.session - 1;
         const nextSession = currentData.session + 1;
-        const { du_doan, do_tin_cay, giai_thich } = predictTaiXiu(historicalData);
+        const { du_doan } = predictTaiXiu(historicalData);
 
-        // Kiểm tra nếu phiên hiện tại khác với phiên đã cache, thì tạo độ tin cậy mới
-        if (cachedSession !== currentData.session) {
-            cachedSession = currentData.session;
+        // Kiểm tra nếu phiên trước khác với phiên đã cache, thì tạo độ tin cậy mới
+        if (cachedSession !== previousSession) {
+            cachedSession = previousSession;
             cachedConfidence = getRandomConfidence() + "%";
         }
         
         const result = {
             id: "@cskhtoollxk",
-            phien_truoc: currentData.session,
+            sid: previousSession,  // phiên trước
             xuc_xac: currentData.dice,
             tong_xuc_xac: currentData.total,
             ket_qua: currentData.result,
             phien_sau: nextSession,
             du_doan: du_doan,
-            do_tin_cay: cachedConfidence, // Sử dụng giá trị đã cache
+            do_tin_cay: cachedConfidence, // dùng giá trị đã cache
             giai_thich: "yêu anh đi chim a to lắm óoo.",
         };
         res.json(result);
@@ -128,11 +129,9 @@ app.get('/api/taixiu/du_doan_68gb', async (req, res) => {
 });
 
 app.get('/', (req, res) => {
-    res.send('Chào mừng đến với API dự đoán Tài Xỉu! Truy cập /api/taixiu/du_doan_sunwin để xem dự đoán.');
+    res.send('Chào mừng đến với API dự đoán Tài Xỉu! Truy cập /api/taixiu/du_doan_68gb để xem dự đoán.');
 });
 
 app.listen(PORT, () => {
     console.log(`Server đang chạy trên cổng ${PORT}`);
 });
-        
-
