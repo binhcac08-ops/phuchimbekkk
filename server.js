@@ -68,7 +68,7 @@ function predictTaiXiu(historicalData) {
 }
 
 // Endpoint chính để lấy dự đoán
-app.get('/api/taixiu/du_doan_hit', async (req, res) => {
+app.get('/api/taixiu/du_doan_68gb', async (req, res) => {
     try {
         const response = await axios.get(HISTORY_API_URL);
 
@@ -94,7 +94,8 @@ app.get('/api/taixiu/du_doan_hit', async (req, res) => {
 
         const currentData = historicalData[0];
         const previousSession = currentData.session - 1;
-        const nextSession = currentData.session + 1;
+        const nextSession = previousSession + 1; // sửa lại cho đúng
+
         const { du_doan } = predictTaiXiu(historicalData);
 
         // Cache độ tin cậy theo phiên trước
@@ -109,7 +110,7 @@ app.get('/api/taixiu/du_doan_hit', async (req, res) => {
             xuc_xac: currentData.dice,
             tong_xuc_xac: currentData.total,
             ket_qua: currentData.result,
-            phien_sau: nextSession,
+            phien_sau: nextSession, // dự đoán phiên tiếp theo
             du_doan: du_doan,
             do_tin_cay: cachedConfidence,
             giai_thich: "yêu anh đi chim a to lắm óoo.",
