@@ -68,7 +68,7 @@ function predictTaiXiu(historicalData) {
 }
 
 // Endpoint chính để lấy dự đoán
-app.get('/api/taixiu/du_doan_68gb', async (req, res) => {
+app.get('/api/taixiu/du_doan_hit', async (req, res) => {
     try {
         const response = await axios.get(HISTORY_API_URL);
 
