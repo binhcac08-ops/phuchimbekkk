@@ -4,10 +4,10 @@ const NodeCache = require('node-cache');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Cache
-const dataCache = new NodeCache({ stdTTL: 3600, checkperiod: 120 });
+// Cache lịch sử (1h)
+const historicalDataCache = new NodeCache({ stdTTL: 3600, checkperiod: 120 });
 
-// API gốc
+// URL API gốc
 const SUNWIN_API_URL = 'https://sicbosun-6esb.onrender.com/api/sicbosun';
 
 // Quản lý lịch sử
@@ -20,6 +20,7 @@ class HistoricalDataManager {
     addSession(newData) {
         if (!newData || !newData.phien) return false;
         if (this.history.some(item => item.phien === newData.phien)) return false;
+
         this.history.push(newData);
         if (this.history.length > this.maxHistoryLength) {
             this.history = this.history.slice(this.history.length - this.maxHistoryLength);
@@ -82,6 +83,7 @@ class PredictionEngine {
         };
     }
 
+    // Dự đoán vị (công thức có thể đổi sau)
     duDoanVi(tong) {
         if (!tong) return [];
         return [
@@ -94,6 +96,7 @@ class PredictionEngine {
     predict() {
         const fullHistory = this.historyMgr.getHistory();
         const historyLength = fullHistory.length;
+
         if (historyLength === 0) {
             return this.buildResult("Chưa xác định", 10, "Không có dữ liệu");
         }
@@ -116,35 +119,49 @@ class PredictionEngine {
         // Cầu bệt
         const taiSeq = this.historyMgr.calculateCurrentSequence(recent10, 'Tài');
         const xiuSeq = this.historyMgr.calculateCurrentSequence(recent10, 'Xỉu');
-        if (taiSeq >= 4) predictionScores['Xỉu'] += taiSeq * dynamicWeights.bet;
-        else if (xiuSeq >= 4) predictionScores['Tài'] += xiuSeq * dynamicWeights.bet;
+        if (taiSeq >= 4) {
+            predictionScores['Xỉu'] += taiSeq * dynamicWeights.bet;
+        } else if (xiuSeq >= 4) {
+            predictionScores['Tài'] += xiuSeq * dynamicWeights.bet;
+        }
 
-        // Cầu đảo
+        // Cầu đảo 1-1
         if (this.isAlternating(recent10, 1) && recent10.length >= 6) {
-            predictionScores[(lastResult === 'Tài') ? "Xỉu" : "Tài"] += dynamicWeights.dao11;
-        }
-        if (this.isAlternating(recent10, 2) && recent10.length >= 8) {
-            predictionScores[(lastResult === 'Tài') ? "Xỉu" : "Tài"] += dynamicWeights.dao22;
-        }
-        if (this.isAlternating(recent20, 3) && recent20.length >= 12) {
-            predictionScores[(lastResult === 'Tài') ? "Xỉu" : "Tài"] += dynamicWeights.dao33;
+            const nextPred = (lastResult === 'Tài') ? "Xỉu" : "Tài";
+            predictionScores[nextPred] += dynamicWeights.dao11;
         }
 
-        // Mẫu lặp lại
+        // Cầu đảo 2-2
+        if (this.isAlternating(recent10, 2) && recent10.length >= 8) {
+            const nextPred = (lastResult === 'Tài') ? "Xỉu" : "Tài";
+            predictionScores[nextPred] += dynamicWeights.dao22;
+        }
+
+        // Cầu 3-3
+        if (this.isAlternating(recent20, 3) && recent20.length >= 12) {
+            const nextPred = (lastResult === 'Tài') ? "Xỉu" : "Tài";
+            predictionScores[nextPred] += dynamicWeights.dao33;
+        }
+
+        // Mẫu lặp lại 5 phiên
         if (recent20.length >= 10) {
             const last5 = recent20.slice(-5).map(r => r.ket_qua).join("");
             const prev5 = recent20.slice(-10, -5).map(r => r.ket_qua).join("");
             if (last5 === prev5) {
-                predictionScores[last5[0] === 'Tài' ? "Tài" : "Xỉu"] += dynamicWeights.mauLapLai;
+                const nextPred = last5[0] === 'Tài' ? "Tài" : "Xỉu";
+                predictionScores[nextPred] += dynamicWeights.mauLapLai;
             }
         }
 
-        // Nhồi
+        // Cầu nhồi (7 phiên gần nhất)
         if (recent10.length >= 7) {
             const taiCount = recent10.filter(r => r.ket_qua === 'Tài').length;
             const xiuCount = recent10.filter(r => r.ket_qua === 'Xỉu').length;
-            if (taiCount >= 5) predictionScores['Tài'] += dynamicWeights.uuTienGanDay;
-            else if (xiuCount >= 5) predictionScores['Xỉu'] += dynamicWeights.uuTienGanDay;
+            if (taiCount >= 5) {
+                predictionScores['Tài'] += dynamicWeights.uuTienGanDay;
+            } else if (xiuCount >= 5) {
+                predictionScores['Xỉu'] += dynamicWeights.uuTienGanDay;
+            }
         }
 
         // Tỷ lệ 30 phiên
@@ -156,10 +173,11 @@ class PredictionEngine {
             }
         }
 
-        // Default
-        predictionScores[(lastResult === 'Tài') ? "Xỉu" : "Tài"] += dynamicWeights.default;
+        // Default: đảo cầu
+        const defaultPrediction = (lastResult === 'Tài') ? "Xỉu" : "Tài";
+        predictionScores[defaultPrediction] += dynamicWeights.default;
 
-        // Kết quả
+        // Tổng hợp
         let finalPrediction = predictionScores['Tài'] > predictionScores['Xỉu'] ? 'Tài' : 'Xỉu';
         let finalScore = predictionScores[finalPrediction];
         const totalScore = predictionScores['Tài'] + predictionScores['Xỉu'];
@@ -168,7 +186,12 @@ class PredictionEngine {
         confidence = confidence * Math.min(1, historyLength / 100);
         confidence = Math.min(99.99, Math.max(10, confidence));
 
-        return this.buildResult(finalPrediction, confidence, "Thuật toán TT/XX phân tích.");
+        // ⚡ Giải thích cố định
+        return this.buildResult(
+            finalPrediction,
+            confidence,
+            "địt con mẹ mày"
+        );
     }
 
     isAlternating(history, groupSize) {
@@ -185,52 +208,69 @@ class PredictionEngine {
 const historyManager = new HistoricalDataManager(500);
 const predictionEngine = new PredictionEngine(historyManager);
 
-// ⏰ Cronjob: Fetch API gốc mỗi 5s
-setInterval(async () => {
+// Hàm hỗ trợ gọi API với cơ chế thử lại khi gặp lỗi 429
+async function fetchDataWithRetry(url, retries = 3, delay = 1000) {
     try {
-        const response = await axios.get(SUNWIN_API_URL, { timeout: 5000 });
-        const currentData = response.data;
+        const response = await axios.get(url, { timeout: 5000 });
+        return response.data;
+    } catch (error) {
+        if (error.response && error.response.status === 429 && retries > 0) {
+            console.warn(`Đã nhận lỗi 429, đang thử lại sau ${delay}ms...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            return fetchDataWithRetry(url, retries - 1, delay * 2);
+        }
+        throw error;
+    }
+}
+
+// API chính
+app.get('/concac/ditme/lxk', async (req, res) => {
+    let currentData = null;
+    let cachedHistoricalData = historicalDataCache.get("full_history");
+    if (cachedHistoricalData) {
+        historyManager.history = cachedHistoricalData;
+    }
+
+    try {
+        const data = await fetchDataWithRetry(SUNWIN_API_URL);
+        currentData = data;
+
         if (currentData && currentData.phien && currentData.ket_qua) {
             historyManager.addSession(currentData);
-            dataCache.set("last_result", currentData);
-            dataCache.set("full_history", historyManager.getHistory());
-            console.log("✅ Fetched phien:", currentData.phien);
+            historicalDataCache.set("full_history", historyManager.getHistory());
         }
-    } catch (err) {
-        console.error("⚠️ Cronjob fetch error:", err.message);
+
+        const { du_doan, do_tin_cay, giai_thich } = predictionEngine.predict();
+
+        const phien_truoc = currentData ? currentData.phien : historyManager.getHistory().slice(-1)[0]?.phien;
+        const tong_truoc = currentData ? currentData.tong : historyManager.getHistory().slice(-1)[0]?.tong;
+        const viDuDoan = predictionEngine.duDoanVi(tong_truoc);
+
+        const result = {
+            id: "@cskhtoollxk",
+            phien_truoc: phien_truoc,
+            ket_qua: currentData ? currentData.ket_qua : null,
+            xuc_xac: currentData ? [currentData.xuc_xac_1, currentData.xuc_xac_2, currentData.xuc_xac_3] : [],
+            tong: tong_truoc,
+            phien_sau: phien_truoc ? phien_truoc + 1 : null,
+            du_doan: du_doan,
+            do_tin_cay: do_tin_cay,
+            du_doan_vi: viDuDoan,
+            giai_thich: giai_thich
+        };
+
+        res.json(result);
+    } catch (error) {
+        console.error("Lỗi API:", error.message);
+        res.status(500).json({ error: "API lỗi", chi_tiet: error.message });
     }
-}, 5000);
-
-// API cho client → đọc cache, không gọi API gốc
-app.get('/concac/ditme/lxk', (req, res) => {
-    const currentData = dataCache.get("last_result");
-    if (!currentData) {
-        return res.status(500).json({ error: "Chưa có dữ liệu cache" });
-    }
-
-    const { du_doan, do_tin_cay, giai_thich } = predictionEngine.predict();
-    const phien_truoc = currentData.phien;
-    const tong_truoc = currentData.tong;
-    const viDuDoan = predictionEngine.duDoanVi(tong_truoc);
-
-    res.json({
-        id: "@cskhtoollxk",
-        phien_truoc,
-        ket_qua: currentData.ket_qua,
-        xuc_xac: [currentData.xuc_xac_1, currentData.xuc_xac_2, currentData.xuc_xac_3],
-        tong: tong_truoc,
-        phien_sau: phien_truoc + 1,
-        du_doan,
-        do_tin_cay,
-        du_doan_vi: viDuDoan,
-        giai_thich
-    });
 });
 
 app.get('/', (req, res) => {
-    res.send('API Sicbo SunWin NodeJS 🚀');
+    res.send('CÓ CÁI ĐẦU BUỒI');
 });
 
 app.listen(PORT, () => {
-    console.log(`✅ Server chạy cổng ${PORT}`);
+    console.log(`Server đang chạy trên cổng ${PORT}`);
 });
+        
