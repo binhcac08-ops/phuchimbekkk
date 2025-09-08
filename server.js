@@ -19,7 +19,6 @@ class HistoricalDataManager {
 
     addSession(newData) {
         if (!newData || !newData.phien) return false;
-        // Sửa: Dùng `some` để kiểm tra phiên đã tồn tại chưa
         if (this.history.some(item => item.phien === newData.phien)) {
             return false;
         }
@@ -201,6 +200,7 @@ class PredictionEngine {
 const historyManager = new HistoricalDataManager(500);
 const predictionEngine = new PredictionEngine(historyManager);
 
+// Hàm hỗ trợ gọi API với cơ chế thử lại khi gặp lỗi 429
 async function fetchDataWithRetry(url, retries = 3, delay = 1000) {
     try {
         const response = await axios.get(url, { timeout: 5000 });
@@ -215,6 +215,7 @@ async function fetchDataWithRetry(url, retries = 3, delay = 1000) {
     }
 }
 
+// API chính
 app.get('/concac/ditme/lxk', async (req, res) => {
     let currentData = null;
     let cachedHistoricalData = historicalDataCache.get("full_history");
@@ -283,6 +284,4 @@ app.get('/', (req, res) => {
 app.listen(PORT, () => {
     console.log(`Server đang chạy trên cổng ${PORT}`);
 });
-
-    });
         
