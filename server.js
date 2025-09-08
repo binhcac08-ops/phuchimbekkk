@@ -108,7 +108,7 @@ class PredictionEngine {
 
         if (historyLength === 1) {
             const du_doan = (lastResult.toLowerCase() === 'tài') ? "Xỉu" : "Tài";
-            return this.buildResult(du_doan, 30, "Chỉ có 1 phiên → dự đoán đảo cầu.");
+            return this.buildResult(du_doan, 30, "địt cmm");
         }
 
         let predictionScores = { 'Tài': 0, 'Xỉu': 0 };
