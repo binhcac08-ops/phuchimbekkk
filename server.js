@@ -19,7 +19,10 @@ class HistoricalDataManager {
 
     addSession(newData) {
         if (!newData || !newData.phien) return false;
-        if (this.history.some(item => item.phien === newData.phien)) return false;
+        // Sửa: Dùng `some` để kiểm tra phiên đã tồn tại chưa
+        if (this.history.some(item => item.phien === newData.phien)) {
+            return false;
+        }
 
         this.history.push(newData);
         if (this.history.length > this.maxHistoryLength) {
@@ -43,8 +46,8 @@ class HistoricalDataManager {
             return { taiCount: 0, xiuCount: 0, totalCount: 0, taiRatio: 0, xiuRatio: 0 };
         }
         dataSubset.forEach(item => {
-            if (item.ket_qua === 'Tài') taiCount++;
-            else if (item.ket_qua === 'Xỉu') xiuCount++;
+            if (item.ket_qua && item.ket_qua.toLowerCase() === 'tài') taiCount++;
+            else if (item.ket_qua && item.ket_qua.toLowerCase() === 'xỉu') xiuCount++;
         });
         const totalCount = dataSubset.length;
         return {
@@ -59,8 +62,9 @@ class HistoricalDataManager {
     calculateCurrentSequence(dataSubset, resultType) {
         if (!dataSubset || dataSubset.length === 0) return 0;
         let count = 0;
+        const lastResultType = resultType.toLowerCase();
         for (let i = dataSubset.length - 1; i >= 0; i--) {
-            if (dataSubset[i].ket_qua === resultType) count++;
+            if (dataSubset[i].ket_qua && dataSubset[i].ket_qua.toLowerCase() === lastResultType) count++;
             else break;
         }
         return count;
@@ -83,7 +87,6 @@ class PredictionEngine {
         };
     }
 
-    // Dự đoán vị (công thức có thể đổi sau)
     duDoanVi(tong) {
         if (!tong) return [];
         return [
@@ -105,7 +108,7 @@ class PredictionEngine {
         const lastResult = recentHistory[recentHistory.length - 1].ket_qua;
 
         if (historyLength === 1) {
-            const du_doan = (lastResult === 'Tài') ? "Xỉu" : "Tài";
+            const du_doan = (lastResult.toLowerCase() === 'tài') ? "Xỉu" : "Tài";
             return this.buildResult(du_doan, 30, "Chỉ có 1 phiên → dự đoán đảo cầu.");
         }
 
@@ -116,7 +119,6 @@ class PredictionEngine {
         const recent10 = this.historyMgr.getRecentHistory(10);
         const recent20 = this.historyMgr.getRecentHistory(20);
 
-        // Cầu bệt
         const taiSeq = this.historyMgr.calculateCurrentSequence(recent10, 'Tài');
         const xiuSeq = this.historyMgr.calculateCurrentSequence(recent10, 'Xỉu');
         if (taiSeq >= 4) {
@@ -125,38 +127,33 @@ class PredictionEngine {
             predictionScores['Tài'] += xiuSeq * dynamicWeights.bet;
         }
 
-        // Cầu đảo 1-1
         if (this.isAlternating(recent10, 1) && recent10.length >= 6) {
-            const nextPred = (lastResult === 'Tài') ? "Xỉu" : "Tài";
+            const nextPred = (lastResult.toLowerCase() === 'tài') ? "Xỉu" : "Tài";
             predictionScores[nextPred] += dynamicWeights.dao11;
         }
 
-        // Cầu đảo 2-2
         if (this.isAlternating(recent10, 2) && recent10.length >= 8) {
-            const nextPred = (lastResult === 'Tài') ? "Xỉu" : "Tài";
+            const nextPred = (lastResult.toLowerCase() === 'tài') ? "Xỉu" : "Tài";
             predictionScores[nextPred] += dynamicWeights.dao22;
         }
 
-        // Cầu 3-3
         if (this.isAlternating(recent20, 3) && recent20.length >= 12) {
-            const nextPred = (lastResult === 'Tài') ? "Xỉu" : "Tài";
+            const nextPred = (lastResult.toLowerCase() === 'tài') ? "Xỉu" : "Tài";
             predictionScores[nextPred] += dynamicWeights.dao33;
         }
 
-        // Mẫu lặp lại 5 phiên
         if (recent20.length >= 10) {
             const last5 = recent20.slice(-5).map(r => r.ket_qua).join("");
             const prev5 = recent20.slice(-10, -5).map(r => r.ket_qua).join("");
-            if (last5 === prev5) {
-                const nextPred = last5[0] === 'Tài' ? "Tài" : "Xỉu";
+            if (last5.toLowerCase() === prev5.toLowerCase()) {
+                const nextPred = last5.toLowerCase()[0] === 't' ? "Tài" : "Xỉu";
                 predictionScores[nextPred] += dynamicWeights.mauLapLai;
             }
         }
 
-        // Cầu nhồi (7 phiên gần nhất)
         if (recent10.length >= 7) {
-            const taiCount = recent10.filter(r => r.ket_qua === 'Tài').length;
-            const xiuCount = recent10.filter(r => r.ket_qua === 'Xỉu').length;
+            const taiCount = recent10.filter(r => r.ket_qua && r.ket_qua.toLowerCase() === 'tài').length;
+            const xiuCount = recent10.filter(r => r.ket_qua && r.ket_qua.toLowerCase() === 'xỉu').length;
             if (taiCount >= 5) {
                 predictionScores['Tài'] += dynamicWeights.uuTienGanDay;
             } else if (xiuCount >= 5) {
@@ -164,7 +161,6 @@ class PredictionEngine {
             }
         }
 
-        // Tỷ lệ 30 phiên
         if (recent30.length >= 10) {
             const { taiRatio, xiuRatio } = this.historyMgr.calculateFrequency(recent30);
             if (Math.abs(taiRatio - xiuRatio) > 0.3) {
@@ -173,11 +169,9 @@ class PredictionEngine {
             }
         }
 
-        // Default: đảo cầu
-        const defaultPrediction = (lastResult === 'Tài') ? "Xỉu" : "Tài";
+        const defaultPrediction = (lastResult.toLowerCase() === 'tài') ? "Xỉu" : "Tài";
         predictionScores[defaultPrediction] += dynamicWeights.default;
 
-        // Tổng hợp
         let finalPrediction = predictionScores['Tài'] > predictionScores['Xỉu'] ? 'Tài' : 'Xỉu';
         let finalScore = predictionScores[finalPrediction];
         const totalScore = predictionScores['Tài'] + predictionScores['Xỉu'];
@@ -186,7 +180,6 @@ class PredictionEngine {
         confidence = confidence * Math.min(1, historyLength / 100);
         confidence = Math.min(99.99, Math.max(10, confidence));
 
-        // ⚡ Giải thích cố định
         return this.buildResult(
             finalPrediction,
             confidence,
@@ -197,7 +190,7 @@ class PredictionEngine {
     isAlternating(history, groupSize) {
         if (history.length < groupSize * 2) return false;
         const recent = history.slice(-groupSize * 2);
-        return recent.slice(0, groupSize).every(r => r.ket_qua !== recent[groupSize].ket_qua);
+        return recent.slice(0, groupSize).every(r => r.ket_qua && recent[groupSize].ket_qua && r.ket_qua.toLowerCase() !== recent[groupSize].ket_qua.toLowerCase());
     }
 
     buildResult(du_doan, do_tin_cay, giai_thich) {
@@ -208,7 +201,6 @@ class PredictionEngine {
 const historyManager = new HistoricalDataManager(500);
 const predictionEngine = new PredictionEngine(historyManager);
 
-// Hàm hỗ trợ gọi API với cơ chế thử lại khi gặp lỗi 429
 async function fetchDataWithRetry(url, retries = 3, delay = 1000) {
     try {
         const response = await axios.get(url, { timeout: 5000 });
@@ -223,7 +215,6 @@ async function fetchDataWithRetry(url, retries = 3, delay = 1000) {
     }
 }
 
-// API chính
 app.get('/concac/ditme/lxk', async (req, res) => {
     let currentData = null;
     let cachedHistoricalData = historicalDataCache.get("full_history");
@@ -235,27 +226,46 @@ app.get('/concac/ditme/lxk', async (req, res) => {
         const data = await fetchDataWithRetry(SUNWIN_API_URL);
         currentData = data;
 
-        if (currentData && currentData.phien && currentData.ket_qua) {
-            historyManager.addSession(currentData);
+        if (currentData && currentData.Phien && currentData.Ket_qua) {
+            const normalizedData = {
+                phien: currentData.Phien,
+                ket_qua: currentData.Ket_qua,
+                tong: currentData.Tong,
+                xuc_xac_1: currentData.Xuc_xac_1,
+                xuc_xac_2: currentData.Xuc_xac_2,
+                xuc_xac_3: currentData.Xuc_xac_3
+            };
+            historyManager.addSession(normalizedData);
             historicalDataCache.set("full_history", historyManager.getHistory());
+        }
+
+        const lastSession = historyManager.getHistory().slice(-1)[0];
+        if (!lastSession) {
+            return res.json({
+                id: "@cskhtoollxk",
+                phien_truoc: null,
+                ket_qua: null,
+                xuc_xac: [],
+                tong: null,
+                phien_sau: null,
+                du_doan: "Chua xac dinh",
+                do_tin_cay: "10.00",
+                giai_thich: "Khong co du lieu de du doan."
+            });
         }
 
         const { du_doan, do_tin_cay, giai_thich } = predictionEngine.predict();
 
-        const phien_truoc = currentData ? currentData.phien : historyManager.getHistory().slice(-1)[0]?.phien;
-        const tong_truoc = currentData ? currentData.tong : historyManager.getHistory().slice(-1)[0]?.tong;
-        const viDuDoan = predictionEngine.duDoanVi(tong_truoc);
-
         const result = {
             id: "@cskhtoollxk",
-            phien_truoc: phien_truoc,
-            ket_qua: currentData ? currentData.ket_qua : null,
-            xuc_xac: currentData ? [currentData.xuc_xac_1, currentData.xuc_xac_2, currentData.xuc_xac_3] : [],
-            tong: tong_truoc,
-            phien_sau: phien_truoc ? phien_truoc + 1 : null,
+            phien_truoc: lastSession.phien,
+            ket_qua: lastSession.ket_qua,
+            xuc_xac: [lastSession.xuc_xac_1, lastSession.xuc_xac_2, lastSession.xuc_xac_3],
+            tong: lastSession.tong,
+            phien_sau: lastSession.phien ? parseInt(lastSession.phien.replace('#', '')) + 1 : null,
             du_doan: du_doan,
             do_tin_cay: do_tin_cay,
-            du_doan_vi: viDuDoan,
+            du_doan_vi: predictionEngine.duDoanVi(lastSession.tong),
             giai_thich: giai_thich
         };
 
@@ -273,4 +283,6 @@ app.get('/', (req, res) => {
 app.listen(PORT, () => {
     console.log(`Server đang chạy trên cổng ${PORT}`);
 });
+
+    });
         
