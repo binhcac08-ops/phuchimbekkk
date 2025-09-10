@@ -200,10 +200,10 @@ class PredictionEngine {
 const historyManager = new HistoricalDataManager(500);
 const predictionEngine = new PredictionEngine(historyManager);
 
-// Hàm hỗ trợ gọi API với cơ chế thử lại khi gặp lỗi 429
-async function fetchDataWithRetry(url, retries = 3, delay = 1000) {
+// Hàm hỗ trợ gọi API với cơ chế thử lại mạnh mẽ hơn
+async function fetchDataWithRetry(url, retries = 5, delay = 2000) {
     try {
-        const response = await axios.get(url, { timeout: 5000 });
+        const response = await axios.get(url, { timeout: 10000 });
         return response.data;
     } catch (error) {
         if (error.response && error.response.status === 429 && retries > 0) {
