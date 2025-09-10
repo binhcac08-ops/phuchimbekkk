@@ -7,20 +7,23 @@ const PORT = process.env.PORT || 3000;
 const SOURCE_API_URL = 'https://api.wsktnus8.net/v2/history/getLastResult?gameId=ktrng_3979&size=100&tableId=39791215743193&curPage=1';
 
 // Endpoint để lấy thông tin của phiên mới nhất
-app.get('/api/taixiu/phien_gan_nhat', async (req, res) => {
+app.get('/api/taixiu/', async (req, res) => {
     try {
         const response = await axios.get(SOURCE_API_URL);
+        const data = response.data;
 
-        // Kiểm tra xem dữ liệu có hợp lệ không
-        if (!response.data || !response.data.gameResultList || !response.data.gameResultList[0]) {
-            console.error("Dữ liệu từ API gốc không hợp lệ.");
+        // Tìm đối tượng chứa danh sách kết quả (kiểm tra các trường có thể có)
+        const gameList = data.gameResultList || data.dữ_liệu?.gameResultList || data.data?.gameResultList;
+
+        if (!gameList || !Array.isArray(gameList) || gameList.length === 0) {
+            console.error("Dữ liệu từ API gốc không hợp lệ hoặc rỗng.");
             return res.status(500).json({
-                error: "Dữ liệu từ API gốc không hợp lệ.",
+                error: "Dữ liệu từ API gốc không hợp lệ hoặc rỗng.",
                 details: "Cấu trúc phản hồi không như mong đợi."
             });
         }
 
-        const latestResult = response.data.gameResultList[0];
+        const latestResult = gameList[0];
 
         // Trích xuất và định dạng thông tin cần thiết
         const result = {
@@ -31,7 +34,6 @@ app.get('/api/taixiu/phien_gan_nhat', async (req, res) => {
         res.json(result);
 
     } catch (error) {
-        // Bắt lỗi chi tiết từ axios
         console.error("Lỗi khi gọi API gốc:", error.message);
         res.status(500).json({
             error: "Không thể lấy dữ liệu từ API gốc.",
